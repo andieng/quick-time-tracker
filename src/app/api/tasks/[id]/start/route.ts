@@ -35,7 +35,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           started_at: null,
           total_seconds: running.total_seconds + elapsed,
         })
-        .eq("id", running.id);
+        .eq("id", running.id)
+        .eq("user_id", user.id);
     }
   }
 
