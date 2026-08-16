@@ -46,17 +46,14 @@ jobs:
       - name: Test
         run: pnpm test:run
 
-  # Only runs on an actual push to main or develop — never for pull requests
-  # or any other branch, so no other branch can trigger a database change.
-  migrate:
-    name: Run Supabase Migration
+  # Only runs on an actual push to develop — never for pull requests or any
+  # other branch, so no other branch can trigger a database change.
+  migrate_dev:
+    name: Run Supabase Migration — Dev
     needs: quality_gate
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
-    # GitHub Environments resolve SUPABASE_PROJECT_REF/SUPABASE_DB_PASSWORD to
-    # each environment's own value, so the same secret names below point at
-    # the right project depending on which branch triggered this run.
-    environment: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
+    environment: dev
     steps:
       - uses: actions/checkout@v6
 
@@ -66,9 +63,31 @@ jobs:
 
       - name: Link project and push migrations
         run: |
-          supabase link --project-ref "$SUPABASE_PROJECT_REF"
+          supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
           supabase db push
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+
+  # Only runs on an actual push to main — never for pull requests or any
+  # other branch, so no other branch can trigger a database change.
+  migrate_prod:
+    name: Run Supabase Migration — Prod
+    needs: quality_gate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+
+      - name: Link project and push migrations
+        run: |
+          supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+          supabase db push
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
