@@ -144,6 +144,13 @@ export function FeedbackModal({
             className="w-full resize-none rounded-md border border-panel-hi bg-void px-3 py-2 font-sans text-sm text-ink placeholder:text-mist outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
           />
 
+          {status === "sent" && (
+            <span className="font-sans text-xs text-signal">Thanks — got it.</span>
+          )}
+          {status === "error" && (
+            <span className="font-sans text-xs text-danger">Couldn&apos;t send that.</span>
+          )}
+
           <div className="flex items-center gap-3">
             <button
               type="submit"
@@ -159,12 +166,6 @@ export function FeedbackModal({
             >
               Cancel
             </button>
-            {status === "sent" && (
-              <span className="font-sans text-xs text-signal">Thanks — got it.</span>
-            )}
-            {status === "error" && (
-              <span className="font-sans text-xs text-danger">Couldn&apos;t send that.</span>
-            )}
           </div>
         </form>
       </div>

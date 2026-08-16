@@ -420,20 +420,19 @@ export function TaskBoard({ initialTasks, userEmail, isSignedIn, initialMultitas
 
       <footer className="mt-16 flex flex-col gap-4 border-t border-panel-hi pt-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-sans text-xs text-mist sm:flex-1">
+          <div className="flex flex-col gap-2 font-sans text-xs text-mist sm:flex-1">
             {isSignedIn ? (
               <>
                 <span>{userEmail}</span>
-                <span aria-hidden="true">·</span>
                 <button
                   onClick={signOut}
-                  className="text-mist underline-offset-4 hover:text-ink hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
+                  className="self-start text-mist underline-offset-4 hover:text-ink hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
                 >
                   Sign out
                 </button>
               </>
             ) : (
-              <>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span>Guest — activities reset if you clear browser data or switch devices</span>
                 <button
                   onClick={signInWithGoogle}
@@ -460,7 +459,7 @@ export function TaskBoard({ initialTasks, userEmail, isSignedIn, initialMultitas
                   Sign in with Google
                 </button>
                 {signInError && <span className="text-danger">{signInError}</span>}
-              </>
+              </div>
             )}
           </div>
 
