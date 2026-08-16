@@ -22,7 +22,7 @@ A minimal time tracker: add a task, hit start/stop. One timer runs at a time. Th
 
 2. **Create a Supabase project** at [supabase.com](https://supabase.com), then copy the Project URL and **publishable key** (Project Settings → API Keys — this is the client-safe key; never use the **secret key** in this app, since it bypasses row-level security).
 
-3. **Run the schema** — open the SQL editor in your Supabase project and run [`supabase/schema.sql`](./supabase/schema.sql). This creates the `tasks` table and its row-level security policies.
+3. **Run the schema** — apply the migration in [`supabase/migrations/`](./supabase/migrations/), either with the [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started) (`supabase link --project-ref <ref>` then `supabase db push`), or by pasting its contents into your Supabase project's SQL editor. This creates the `tasks` and `feedback` tables and their row-level security policies.
 
 4. **Enable Google sign-in**
    - In [Google Cloud Console](https://console.cloud.google.com/), create an OAuth client (Web application), and add `https://<your-project-ref>.supabase.co/auth/v1/callback` as an authorized redirect URI.
@@ -44,6 +44,28 @@ A minimal time tracker: add a task, hit start/stop. One timer runs at a time. Th
 
 ## Deploying
 
-Connect the repo to Vercel and set the same environment variables (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`) in the Vercel project settings. Vercel deploys automatically on push; a GitHub Actions quality gate (`.github/workflows/quality-gate.yml`) runs lint, typecheck, build, and tests on every push/PR to `main`.
+Connect the repo to Vercel and set the same environment variables (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`) in the Vercel project settings — scope prod values to Production and dev-project values to Preview/Development, since `main` and `develop` map to separate Supabase projects (see below). Vercel deploys automatically on push.
 
-Also add your deployed origin's callback URL (`https://<your-domain>/auth/callback`) to the Supabase Auth redirect allow list.
+Also add your deployed origin's callback URL (`https://<your-domain>/auth/callback`) to each Supabase project's Auth redirect allow list.
+
+### CI/CD
+
+`.github/workflows/quality-gate.yml` runs on every push/PR to `main` or `develop`:
+
+- **Quality Gate** — lint, typecheck, build, test.
+- **Run Supabase Migration** — only on an actual push (not PRs) to `main` or `develop`, never any other branch. Uses the Supabase CLI (`supabase link` + `supabase db push`) to apply `supabase/migrations/` against the matching project: `main` → prod, `develop` → dev.
+
+Repo-level (Settings → Secrets and variables → Actions):
+
+| Name | Notes |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` (variable) | Used for the build step's smoke test |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (secret) | Used for the build step's smoke test |
+| `SUPABASE_ACCESS_TOKEN` (secret) | Personal access token from your [Supabase account settings](https://supabase.com/dashboard/account/tokens) — account-level, shared across both projects |
+
+The migration job also needs two [GitHub Environments](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment) (Settings → Environments), each with its own secrets of the **same names** — the workflow resolves `SUPABASE_PROJECT_REF`/`SUPABASE_DB_PASSWORD` to whichever environment the job is running under, so no branch-conditional logic is needed in the workflow itself:
+
+| Environment | `SUPABASE_PROJECT_REF` | `SUPABASE_DB_PASSWORD` |
+|---|---|---|
+| `prod` (used on push to `main`) | prod project ref | prod project's DB password |
+| `dev` (used on push to `develop`) | dev project ref | dev project's DB password |

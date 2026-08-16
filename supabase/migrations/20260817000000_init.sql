@@ -1,6 +1,7 @@
--- Safe to run in the Supabase SQL editor at any time: creates everything
--- fresh on a new project, and upgrades an existing project to the latest
--- schema without erroring or losing data if run again.
+-- Initial schema. Applied via `supabase db push` (see .github/workflows) —
+-- the CLI tracks which migrations have run, so this only executes once per
+-- linked project. Written with if-not-exists/idempotent guards anyway as a
+-- safety net for manual intervention.
 
 create table if not exists public.tasks (
   id uuid primary key default gen_random_uuid(),
