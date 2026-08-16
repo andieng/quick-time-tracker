@@ -29,14 +29,17 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      - name: Typecheck
-        run: pnpm typecheck
-
       - name: Build
         run: pnpm build
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+
+      # Runs after Build: Next.js generates types like LayoutProps into
+      # .next/types as a build side effect, so a standalone typecheck run
+      # before any build fails on those even though the code is fine.
+      - name: Typecheck
+        run: pnpm typecheck
 
       - name: Test
         run: pnpm test:run
