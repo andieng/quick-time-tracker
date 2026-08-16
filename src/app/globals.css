@@ -1,26 +1,60 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --color-void: #0b0c0f;
+  --color-panel: #18191e;
+  --color-panel-hi: #27292f;
+  --color-ink: #f4f4f6;
+  --color-mist: #9a9ca5;
+  --color-signal: #8172f2;
+  --color-signal-2: #3b82f6;
+  --color-signal-dim: #8172f226;
+  --color-danger: #f87171;
+  --color-danger-dim: #f8717126;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-void: var(--color-void);
+  --color-panel: var(--color-panel);
+  --color-panel-hi: var(--color-panel-hi);
+  --color-ink: var(--color-ink);
+  --color-mist: var(--color-mist);
+  --color-signal: var(--color-signal);
+  --color-signal-2: var(--color-signal-2);
+  --color-signal-dim: var(--color-signal-dim);
+  --color-danger: var(--color-danger);
+  --color-danger-dim: var(--color-danger-dim);
+  --font-display: var(--font-plex-condensed);
+  --font-mono: var(--font-plex-mono);
+  --font-sans: var(--font-plex-sans);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-void);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pulse-signal {
+    animation: pulse-signal 2s ease-in-out infinite;
+  }
+}
+
+@keyframes pulse-signal {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
 }
