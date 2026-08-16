@@ -63,9 +63,9 @@ Repo-level (Settings → Secrets and variables → Actions):
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (secret) | Used for the build step's smoke test |
 | `SUPABASE_ACCESS_TOKEN` (secret) | Personal access token from your [Supabase account settings](https://supabase.com/dashboard/account/tokens) — account-level, shared across both projects |
 
-The migration job also needs two [GitHub Environments](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment) (Settings → Environments), each with its own secrets of the **same names** — the workflow resolves `SUPABASE_PROJECT_REF`/`SUPABASE_DB_PASSWORD` to whichever environment the job is running under, so no branch-conditional logic is needed in the workflow itself:
+The migration job also needs two [GitHub Environments](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment) (Settings → Environments), named **exactly** `Production` and `Development` (the workflow selects between them by branch, and the name must match exactly). Each needs its own **Environment secrets** (not repo-level secrets) with the same two names — `SUPABASE_PROJECT_REF` and `SUPABASE_DB_PASSWORD` resolve to whichever environment the job runs under:
 
-| Environment | `SUPABASE_PROJECT_REF` | `SUPABASE_DB_PASSWORD` |
-|---|---|---|
-| `prod` (used on push to `main`) | prod project ref | prod project's DB password |
-| `dev` (used on push to `develop`) | dev project ref | dev project's DB password |
+| Environment | Used on push to | `SUPABASE_PROJECT_REF` | `SUPABASE_DB_PASSWORD` |
+|---|---|---|---|
+| `Production` | `main` | prod project ref | prod project's DB password |
+| `Development` | `develop` | dev project ref | dev project's DB password |
