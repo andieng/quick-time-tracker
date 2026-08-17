@@ -2,6 +2,8 @@
 
 A minimal time tracker: add a task, hit start/stop. One timer runs at a time. There's no login gate — the tracker itself is the landing page.
 
+Vibe-coded with [Claude Code](https://claude.com/claude-code) — the app, its Supabase backend, and its CI/CD pipeline were all built through conversation, not hand-written line by line.
+
 - **Just show up** — tasks are tracked immediately, stored in the browser's `localStorage`. No account, no server round-trip. Clearing browser data or switching devices resets guest data.
 - **Sign in with Google** (a link in the header, or in the guest banner) — any tasks already tracked as a guest are migrated into the account automatically on first sign-in. From then on, data is stored in Supabase and safe across a cleared cache, a different browser, or a new device.
 
