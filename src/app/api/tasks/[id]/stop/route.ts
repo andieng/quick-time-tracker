@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { resolveClientTimestamp } from "@/lib/client-time";
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -27,7 +28,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "Task is not running" }, { status: 409 });
   }
 
-  const elapsed = Math.floor((Date.now() - new Date(task.started_at).getTime()) / 1000);
+  const { clientNow } = await request.json().catch(() => ({ clientNow: undefined }));
+  const startedAtMs = new Date(task.started_at).getTime();
+  const stoppedAtMs = resolveClientTimestamp(clientNow, startedAtMs);
+  const elapsed = Math.floor((stoppedAtMs - startedAtMs) / 1000);
 
   const { data, error } = await supabase
     .from("tasks")

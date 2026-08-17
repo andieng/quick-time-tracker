@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { stopRunningTasks } from "@/lib/supabase/stop-running-tasks";
+import { resolveClientTimestamp } from "@/lib/client-time";
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -12,37 +14,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // In focus mode only one task can run at a time: stop whichever one is
-  // currently running and fold its elapsed time into total_seconds before
-  // starting the new one. Multitask mode skips this and leaves others running.
+  const { clientNow } = await request.json().catch(() => ({ clientNow: undefined }));
+  const startedAtMs = resolveClientTimestamp(clientNow, Date.now() - 60_000);
+
   const multitask = user.user_metadata?.multitask === true;
-
   if (!multitask) {
-    const { data: runningTasks } = await supabase
-      .from("tasks")
-      .select("id, started_at, total_seconds")
-      .eq("user_id", user.id)
-      .eq("is_running", true);
-
-    for (const running of runningTasks ?? []) {
-      const elapsed = Math.floor(
-        (Date.now() - new Date(running.started_at!).getTime()) / 1000,
-      );
-      await supabase
-        .from("tasks")
-        .update({
-          is_running: false,
-          started_at: null,
-          total_seconds: running.total_seconds + elapsed,
-        })
-        .eq("id", running.id)
-        .eq("user_id", user.id);
-    }
+    await stopRunningTasks(supabase, user.id, clientNow);
   }
 
   const { data, error } = await supabase
     .from("tasks")
-    .update({ is_running: true, started_at: new Date().toISOString() })
+    .update({ is_running: true, started_at: new Date(startedAtMs).toISOString() })
     .eq("id", id)
     .eq("user_id", user.id)
     .select()

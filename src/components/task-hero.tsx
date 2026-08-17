@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { formatDuration } from "@/lib/format-duration";
 import { useLiveSeconds } from "@/lib/use-live-seconds";
+import { Spinner } from "@/components/spinner";
 import type { Task } from "@/lib/types";
 
 type TaskHeroProps = {
@@ -111,10 +112,14 @@ export function TaskHero({ task, index, onStop, onRename, pending }: TaskHeroPro
             aria-label={`Stop ${task.name}`}
             className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-signal to-signal-2 text-ink transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
           >
-            <svg width="16" height="16" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
-              <rect x="1" y="1" width="4.5" height="12" rx="1" />
-              <rect x="8.5" y="1" width="4.5" height="12" rx="1" />
-            </svg>
+            {pending ? (
+              <Spinner size={16} />
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
+                <rect x="1" y="1" width="4.5" height="12" rx="1" />
+                <rect x="8.5" y="1" width="4.5" height="12" rx="1" />
+              </svg>
+            )}
           </button>
         </div>
       </div>

@@ -7,17 +7,24 @@ export function useLiveSeconds(task: Task | null): number {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    if (!task?.is_running) return;
-    // `now` may predate this task's started_at (it was last set whenever
-    // this hook last rendered), which would show negative elapsed time
-    // until the first interval tick. Resync on the next macrotask instead
-    // of calling setState synchronously in the effect body.
-    const resync = setTimeout(() => setNow(Date.now()), 0);
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => {
-      clearTimeout(resync);
-      clearInterval(interval);
+    if (!task?.is_running || !task.started_at) return;
+    const startedAtMs = new Date(task.started_at).getTime();
+
+    // Align ticks to the actual second boundaries of started_at, rather
+    // than to whenever this effect happened to run. A plain 1s interval
+    // drifts out of phase with real elapsed time, so the displayed number
+    // can lag up to ~1s behind — e.g. showing "13" for a moment after the
+    // real elapsed time has already ticked over to 14, causing Pause to
+    // record a different number than what was on screen when clicked.
+    let timeout: ReturnType<typeof setTimeout>;
+    const tick = () => {
+      const current = Date.now();
+      setNow(current);
+      const msIntoSecond = (current - startedAtMs) % 1000;
+      timeout = setTimeout(tick, 1000 - msIntoSecond);
     };
+    timeout = setTimeout(tick, 0);
+    return () => clearTimeout(timeout);
   }, [task?.is_running, task?.started_at]);
 
   if (!task) return 0;

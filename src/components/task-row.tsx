@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { formatDuration } from "@/lib/format-duration";
 import { useLiveSeconds } from "@/lib/use-live-seconds";
+import { Spinner } from "@/components/spinner";
 import type { Task } from "@/lib/types";
 
 type TaskRowProps = {
@@ -11,12 +12,23 @@ type TaskRowProps = {
   onToggle: (task: Task) => void;
   onDelete: (task: Task) => void;
   onRename: (task: Task, name: string) => void;
-  pending: boolean;
+  // Which action is syncing in the background for this row, if any. Only
+  // the matching button spins — its sibling just goes disabled, since it
+  // isn't the action that was actually clicked.
+  pendingAction: "start" | "delete" | null;
 };
 
-export function TaskRow({ task, index, onToggle, onDelete, onRename, pending }: TaskRowProps) {
+export function TaskRow({
+  task,
+  index,
+  onToggle,
+  onDelete,
+  onRename,
+  pendingAction,
+}: TaskRowProps) {
   const liveSeconds = useLiveSeconds(task);
   const [isEditing, setIsEditing] = useState(false);
+  const isBusy = pendingAction !== null;
 
   return (
     <li className="group flex items-center justify-between gap-3 rounded-md border border-panel-hi bg-panel py-4 pr-4 pl-4">
@@ -81,28 +93,36 @@ export function TaskRow({ task, index, onToggle, onDelete, onRename, pending }: 
         </span>
         <button
           onClick={() => onToggle(task)}
-          disabled={pending}
+          disabled={isBusy}
           aria-label={`Start ${task.name}`}
           className="flex h-9 w-9 items-center justify-center rounded-full bg-panel-hi text-signal transition-colors hover:bg-signal-dim disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
         >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
-            <polygon points="2,1 13,7 2,13" />
-          </svg>
+          {pendingAction === "start" ? (
+            <Spinner />
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
+              <polygon points="2,1 13,7 2,13" />
+            </svg>
+          )}
         </button>
         <button
           onClick={() => onDelete(task)}
-          disabled={pending}
+          disabled={isBusy}
           aria-label={`Delete ${task.name}`}
           className="flex h-9 w-9 items-center justify-center rounded-full text-danger opacity-70 transition-opacity hover:bg-danger-dim hover:opacity-100 focus-visible:bg-danger-dim focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-danger disabled:opacity-30"
         >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-            <path
-              d="M2 2L12 12M12 2L2 12"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            />
-          </svg>
+          {pendingAction === "delete" ? (
+            <Spinner />
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <path
+                d="M2 2L12 12M12 2L2 12"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+            </svg>
+          )}
         </button>
       </div>
     </li>

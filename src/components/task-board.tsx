@@ -25,6 +25,7 @@ import {
 import { TaskHero } from "@/components/task-hero";
 import { TaskRow } from "@/components/task-row";
 import { FeedbackModal } from "@/components/feedback-modal";
+import { Spinner } from "@/components/spinner";
 import type { Task } from "@/lib/types";
 
 type TaskBoardProps = {
@@ -47,9 +48,15 @@ export function TaskBoard({ initialTasks, userEmail, isSignedIn, initialMultitas
 
   const [name, setName] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [pendingId, setPendingId] = useState<string | null>(null);
+  // Which background action (if any) is in flight for a given task id.
+  // Drives per-row pending UI: only the button that was actually clicked
+  // shows a spinner, its sibling on the same row just goes disabled.
+  const [pendingActions, setPendingActions] = useState<Record<string, "start" | "stop" | "delete">>(
+    {},
+  );
   const [signInError, setSignInError] = useState<string | null>(null);
   const [confirmingClear, setConfirmingClear] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedbackType, setFeedbackType] = useState<"bug" | "feature">("bug");
   const [feedbackMessage, setFeedbackMessage] = useState("");
@@ -58,6 +65,11 @@ export function TaskBoard({ initialTasks, userEmail, isSignedIn, initialMultitas
   );
   const migrated = useRef(false);
   const seqBackfilled = useRef(false);
+  // In-flight create requests, keyed by the task id the browser generated
+  // for them. Stop/Delete on a task id that's still being created await
+  // the matching entry before firing their own request, so the insert is
+  // guaranteed to land first — invisibly, with no extra spinner or delay.
+  const creationRequests = useRef(new Map<string, Promise<boolean>>());
   const router = useRouter();
 
   // One-time self-heal: guest activities created before "seq" existed don't
@@ -106,6 +118,12 @@ export function TaskBoard({ initialTasks, userEmail, isSignedIn, initialMultitas
   }, [confirmingClear]);
 
   useEffect(() => {
+    if (!actionError) return;
+    const timeout = setTimeout(() => setActionError(null), 4000);
+    return () => clearTimeout(timeout);
+  }, [actionError]);
+
+  useEffect(() => {
     if (feedbackStatus !== "sent") return;
     const timeout = setTimeout(() => {
       setFeedbackOpen(false);
@@ -113,6 +131,18 @@ export function TaskBoard({ initialTasks, userEmail, isSignedIn, initialMultitas
     }, 1500);
     return () => clearTimeout(timeout);
   }, [feedbackStatus]);
+
+  const setPending = (taskId: string, action: "start" | "stop" | "delete") => {
+    setPendingActions((prev) => ({ ...prev, [taskId]: action }));
+  };
+  const clearPending = (taskId: string) => {
+    setPendingActions((prev) => {
+      if (!(taskId in prev)) return prev;
+      const next = { ...prev };
+      delete next[taskId];
+      return next;
+    });
+  };
 
   const runTask = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -126,31 +156,62 @@ export function TaskBoard({ initialTasks, userEmail, isSignedIn, initialMultitas
       return;
     }
 
+    // The id is generated here instead of waiting for the server to hand
+    // one back, so the new row is immediately a real, addressable task —
+    // Stop/Delete can target it right away with no round trip to wait on.
+    const id = crypto.randomUUID();
+    const now = Date.now();
+    const clientNow = new Date(now).toISOString();
+    const maxSeq = tasks.reduce((max, t) => Math.max(max, t.seq || 0), 0);
+    const optimisticTask: Task = {
+      id,
+      user_id: "",
+      seq: maxSeq + 1,
+      name: taskName,
+      created_at: clientNow,
+      is_running: true,
+      started_at: clientNow,
+      total_seconds: 0,
+    };
+
     setSubmitting(true);
-    try {
-      const res = await fetch("/api/tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: taskName }),
-      });
-      if (!res.ok) return;
-      const { task } = await res.json();
+    setName("");
+    setSignedInTasks((prev) => [
+      optimisticTask,
+      ...prev.map((t) =>
+        !multitask && t.is_running ? { ...t, is_running: false, started_at: null } : t,
+      ),
+    ]);
 
-      const startRes = await fetch(`/api/tasks/${task.id}/start`, { method: "POST" });
-      const started = startRes.ok ? (await startRes.json()).task : task;
-
-      setSignedInTasks((prev) => [
-        started,
-        ...prev.map((t) =>
-          !multitask && t.is_running && t.id !== started.id
-            ? { ...t, is_running: false, started_at: null }
-            : t,
-        ),
-      ]);
-      setName("");
-    } finally {
-      setSubmitting(false);
-    }
+    // Any Stop/Delete fired on this id before the insert lands still needs
+    // to happen after it server-side, or it would 404 or silently no-op —
+    // tracked here so those actions can wait on it invisibly (no spinner,
+    // no disabled button) instead of blocking the click itself.
+    const creation = (async () => {
+      try {
+        const res = await fetch("/api/tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, name: taskName, clientNow }),
+        });
+        if (!res.ok) {
+          setSignedInTasks((prev) => prev.filter((t) => t.id !== id));
+          setActionError("Couldn't start activity — try again.");
+          return false;
+        }
+        const { task } = await res.json();
+        setSignedInTasks((prev) => prev.map((t) => (t.id === id ? task : t)));
+        return true;
+      } catch {
+        setSignedInTasks((prev) => prev.filter((t) => t.id !== id));
+        setActionError("Couldn't start activity — try again.");
+        return false;
+      } finally {
+        setSubmitting(false);
+        creationRequests.current.delete(id);
+      }
+    })();
+    creationRequests.current.set(id, creation);
   };
 
   const renameTask = async (task: Task, newName: string) => {
@@ -176,26 +237,59 @@ export function TaskBoard({ initialTasks, userEmail, isSignedIn, initialMultitas
       return;
     }
 
-    setPendingId(task.id);
+    const now = Date.now();
+    const clientNow = new Date(now).toISOString();
+    const action = task.is_running ? "stop" : "start";
+    const snapshot = signedInTasks;
+
+    // Optimistic: reflect the click instantly instead of waiting on the
+    // round trip, so the displayed time matches what the user actually saw.
+    setSignedInTasks((prev) =>
+      prev.map((t) => {
+        if (t.id === task.id) {
+          return task.is_running
+            ? {
+                ...t,
+                is_running: false,
+                started_at: null,
+                total_seconds:
+                  t.total_seconds + Math.floor((now - new Date(t.started_at ?? now).getTime()) / 1000),
+              }
+            : { ...t, is_running: true, started_at: clientNow };
+        }
+        if (!multitask && action === "start" && t.is_running) {
+          return { ...t, is_running: false, started_at: null };
+        }
+        return t;
+      }),
+    );
+    setPending(task.id, action);
+
     try {
-      const res = await fetch(`/api/tasks/${task.id}/${task.is_running ? "stop" : "start"}`, {
+      // If this task's create request is still in flight, its row may not
+      // exist yet — wait for it to land first. In practice this resolves
+      // immediately, since a human click always trails the create request
+      // that put the row on screen.
+      const stillCreating = creationRequests.current.get(task.id);
+      if (stillCreating && !(await stillCreating)) return;
+
+      const res = await fetch(`/api/tasks/${task.id}/${action}`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientNow }),
       });
       if (res.ok) {
         const { task: updated } = await res.json();
-        setSignedInTasks((prev) =>
-          prev.map((t) => {
-            if (t.id === updated.id) return updated;
-            // In focus mode, starting a task stops whatever else was running.
-            if (!multitask && updated.is_running && t.is_running) {
-              return { ...t, is_running: false, started_at: null };
-            }
-            return t;
-          }),
-        );
+        setSignedInTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+      } else {
+        setSignedInTasks(snapshot);
+        setActionError("Couldn't update activity — try again.");
       }
+    } catch {
+      setSignedInTasks(snapshot);
+      setActionError("Couldn't update activity — try again.");
     } finally {
-      setPendingId(null);
+      clearPending(task.id);
     }
   };
 
@@ -210,12 +304,15 @@ export function TaskBoard({ initialTasks, userEmail, isSignedIn, initialMultitas
           new Date(a.started_at ?? 0) > new Date(b.started_at ?? 0) ? a : b,
         ).id;
         const toStop = runningTasks.filter((t) => t.id !== mostRecentId);
+        const clientNow = new Date().toISOString();
 
         const results = await Promise.all(
           toStop.map((t) =>
-            fetch(`/api/tasks/${t.id}/stop`, { method: "POST" }).then((r) =>
-              r.ok ? r.json() : null,
-            ),
+            fetch(`/api/tasks/${t.id}/stop`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ clientNow }),
+            }).then((r) => (r.ok ? r.json() : null)),
           ),
         );
         setSignedInTasks((prev) =>
@@ -242,14 +339,26 @@ export function TaskBoard({ initialTasks, userEmail, isSignedIn, initialMultitas
       return;
     }
 
-    setPendingId(task.id);
+    const snapshot = signedInTasks;
+    setSignedInTasks((prev) => prev.filter((t) => t.id !== task.id));
+    setPending(task.id, "delete");
     try {
+      // See toggleTask: wait for this task's create request to land first
+      // if it's still in flight, so a delete can't reach the server before
+      // the row it's deleting exists.
+      const stillCreating = creationRequests.current.get(task.id);
+      if (stillCreating && !(await stillCreating)) return;
+
       const res = await fetch(`/api/tasks/${task.id}`, { method: "DELETE" });
-      if (res.ok) {
-        setSignedInTasks((prev) => prev.filter((t) => t.id !== task.id));
+      if (!res.ok) {
+        setSignedInTasks(snapshot);
+        setActionError("Couldn't delete activity — try again.");
       }
+    } catch {
+      setSignedInTasks(snapshot);
+      setActionError("Couldn't delete activity — try again.");
     } finally {
-      setPendingId(null);
+      clearPending(task.id);
     }
   };
 
@@ -347,6 +456,7 @@ export function TaskBoard({ initialTasks, userEmail, isSignedIn, initialMultitas
       </header>
 
       <main className="flex flex-1 flex-col gap-6">
+        {actionError && <p className="font-sans text-xs text-danger">{actionError}</p>}
         {runningTasks.length === 0 ? (
           <TaskHero task={null} onStop={toggleTask} onRename={renameTask} pending={false} />
         ) : (
@@ -358,7 +468,7 @@ export function TaskBoard({ initialTasks, userEmail, isSignedIn, initialMultitas
                 index={task.seq || 0}
                 onStop={toggleTask}
                 onRename={renameTask}
-                pending={pendingId === task.id}
+                pending={pendingActions[task.id] === "stop"}
               />
             ))}
           </div>
@@ -372,9 +482,13 @@ export function TaskBoard({ initialTasks, userEmail, isSignedIn, initialMultitas
               aria-label="Run"
               className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-gradient-to-b from-signal to-signal-2 text-ink shadow-[inset_0_1px_0_rgba(255,255,255,0.3),0_10px_24px_-8px_rgba(129,114,242,0.65)] transition-all duration-150 hover:brightness-110 active:translate-y-px active:shadow-[inset_0_1px_0_rgba(255,255,255,0.3),0_2px_8px_-2px_rgba(129,114,242,0.5)] disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
             >
-              <svg width="18" height="18" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
-                <polygon points="2,1 13,7 2,13" />
-              </svg>
+              {submitting ? (
+                <Spinner size={18} />
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
+                  <polygon points="2,1 13,7 2,13" />
+                </svg>
+              )}
             </button>
             <input
               value={name}
@@ -402,17 +516,20 @@ export function TaskBoard({ initialTasks, userEmail, isSignedIn, initialMultitas
               </button>
             )}
             <ul className="flex flex-col gap-2">
-              {idleTasks.map((task) => (
-                <TaskRow
-                  key={task.id}
-                  task={task}
-                  index={task.seq || 0}
-                  onToggle={toggleTask}
-                  onDelete={deleteTask}
-                  onRename={renameTask}
-                  pending={pendingId === task.id}
-                />
-              ))}
+              {idleTasks.map((task) => {
+                const rowAction = pendingActions[task.id];
+                return (
+                  <TaskRow
+                    key={task.id}
+                    task={task}
+                    index={task.seq || 0}
+                    onToggle={toggleTask}
+                    onDelete={deleteTask}
+                    onRename={renameTask}
+                    pendingAction={rowAction === "start" || rowAction === "delete" ? rowAction : null}
+                  />
+                );
+              })}
             </ul>
           </div>
         )}
