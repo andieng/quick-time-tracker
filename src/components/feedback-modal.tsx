@@ -141,6 +141,7 @@ export function FeedbackModal({
             onChange={(e) => onMessageChange(e.target.value)}
             placeholder={type === "bug" ? "What went wrong?" : "What would you like to see?"}
             rows={4}
+            maxLength={2000}
             className="w-full resize-none rounded-md border border-panel-hi bg-void px-3 py-2 font-sans text-sm text-ink placeholder:text-mist outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
           />
 
