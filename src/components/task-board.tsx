@@ -65,12 +65,33 @@ export function TaskBoard({ initialTasks, userEmail, isSignedIn, initialMultitas
   );
   const migrated = useRef(false);
   const seqBackfilled = useRef(false);
-  // In-flight create requests, keyed by the task id the browser generated
-  // for them. Stop/Delete on a task id that's still being created await
-  // the matching entry before firing their own request, so the insert is
-  // guaranteed to land first — invisibly, with no extra spinner or delay.
-  const creationRequests = useRef(new Map<string, Promise<boolean>>());
+  // actionChains: latest in-flight request per task id, so rapid clicks land
+  // on the server in click order. actionEpochs: bumped on each optimistic
+  // mutation, so a stale response can't overwrite a newer click's state.
+  const actionChains = useRef(new Map<string, Promise<boolean>>());
+  const actionEpochs = useRef(new Map<string, number>());
   const router = useRouter();
+
+  const bumpEpoch = (taskId: string) => {
+    const next = (actionEpochs.current.get(taskId) ?? 0) + 1;
+    actionEpochs.current.set(taskId, next);
+    return next;
+  };
+  const isCurrentEpoch = (taskId: string, epoch: number) =>
+    actionEpochs.current.get(taskId) === epoch;
+
+  // Fallback when an action fails: pull server truth instead of guessing a rollback.
+  const refetchTasks = async () => {
+    try {
+      const res = await fetch("/api/tasks");
+      if (res.ok) {
+        const { tasks: fresh } = await res.json();
+        setSignedInTasks(fresh);
+      }
+    } catch {
+      // Leave optimistic state in place; the next successful action reconciles.
+    }
+  };
 
   // One-time self-heal: guest activities created before "seq" existed don't
   // have one yet — assign them one in creation order, same as the Supabase
@@ -144,7 +165,7 @@ export function TaskBoard({ initialTasks, userEmail, isSignedIn, initialMultitas
     });
   };
 
-  const runTask = async (e: React.FormEvent) => {
+  const runTask = async (e: React.SubmitEvent) => {
     e.preventDefault();
     if (submitting) return;
     const taskName = name.trim() || autoTaskName();
@@ -182,11 +203,13 @@ export function TaskBoard({ initialTasks, userEmail, isSignedIn, initialMultitas
         !multitask && t.is_running ? { ...t, is_running: false, started_at: null } : t,
       ),
     ]);
+    const epoch = bumpEpoch(id);
+    // Bump epochs of tasks optimistically stopped by focus mode too.
+    if (!multitask) {
+      for (const t of tasks) if (t.is_running) bumpEpoch(t.id);
+    }
 
-    // Any Stop/Delete fired on this id before the insert lands still needs
-    // to happen after it server-side, or it would 404 or silently no-op —
-    // tracked here so those actions can wait on it invisibly (no spinner,
-    // no disabled button) instead of blocking the click itself.
+    // Chained in actionChains so a Stop/Delete fired before this lands waits for it.
     const creation = (async () => {
       try {
         const res = await fetch("/api/tasks", {
@@ -195,23 +218,31 @@ export function TaskBoard({ initialTasks, userEmail, isSignedIn, initialMultitas
           body: JSON.stringify({ id, name: taskName, clientNow }),
         });
         if (!res.ok) {
-          setSignedInTasks((prev) => prev.filter((t) => t.id !== id));
+          if (isCurrentEpoch(id, epoch)) {
+            setSignedInTasks((prev) => prev.filter((t) => t.id !== id));
+          }
           setActionError("Couldn't start activity — try again.");
           return false;
         }
         const { task } = await res.json();
-        setSignedInTasks((prev) => prev.map((t) => (t.id === id ? task : t)));
+        if (isCurrentEpoch(id, epoch)) {
+          setSignedInTasks((prev) => prev.map((t) => (t.id === id ? task : t)));
+        }
         return true;
       } catch {
-        setSignedInTasks((prev) => prev.filter((t) => t.id !== id));
+        if (isCurrentEpoch(id, epoch)) {
+          setSignedInTasks((prev) => prev.filter((t) => t.id !== id));
+        }
         setActionError("Couldn't start activity — try again.");
         return false;
       } finally {
         setSubmitting(false);
-        creationRequests.current.delete(id);
       }
     })();
-    creationRequests.current.set(id, creation);
+    actionChains.current.set(id, creation);
+    void creation.finally(() => {
+      if (actionChains.current.get(id) === creation) actionChains.current.delete(id);
+    });
   };
 
   const renameTask = async (task: Task, newName: string) => {
@@ -240,7 +271,6 @@ export function TaskBoard({ initialTasks, userEmail, isSignedIn, initialMultitas
     const now = Date.now();
     const clientNow = new Date(now).toISOString();
     const action = task.is_running ? "stop" : "start";
-    const snapshot = signedInTasks;
 
     // Optimistic: reflect the click instantly instead of waiting on the
     // round trip, so the displayed time matches what the user actually saw.
@@ -264,33 +294,51 @@ export function TaskBoard({ initialTasks, userEmail, isSignedIn, initialMultitas
       }),
     );
     setPending(task.id, action);
-
-    try {
-      // If this task's create request is still in flight, its row may not
-      // exist yet — wait for it to land first. In practice this resolves
-      // immediately, since a human click always trails the create request
-      // that put the row on screen.
-      const stillCreating = creationRequests.current.get(task.id);
-      if (stillCreating && !(await stillCreating)) return;
-
-      const res = await fetch(`/api/tasks/${task.id}/${action}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientNow }),
-      });
-      if (res.ok) {
-        const { task: updated } = await res.json();
-        setSignedInTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-      } else {
-        setSignedInTasks(snapshot);
-        setActionError("Couldn't update activity — try again.");
+    const epoch = bumpEpoch(task.id);
+    if (!multitask && action === "start") {
+      for (const t of signedInTasks) {
+        if (t.is_running && t.id !== task.id) bumpEpoch(t.id);
       }
-    } catch {
-      setSignedInTasks(snapshot);
-      setActionError("Couldn't update activity — try again.");
-    } finally {
-      clearPending(task.id);
     }
+
+    // Chain behind this task's previous in-flight request, so requests reach the server in click order.
+    const predecessor = actionChains.current.get(task.id);
+    const request = (async () => {
+      try {
+        if (predecessor && !(await predecessor)) {
+          // Predecessor failed — this click's assumed state never existed server-side.
+          if (isCurrentEpoch(task.id, epoch)) await refetchTasks();
+          return false;
+        }
+
+        const res = await fetch(`/api/tasks/${task.id}/${action}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clientNow }),
+        });
+        if (!res.ok) {
+          setActionError("Couldn't update activity — try again.");
+          if (isCurrentEpoch(task.id, epoch)) await refetchTasks();
+          return false;
+        }
+        const { task: updated } = await res.json();
+        if (isCurrentEpoch(task.id, epoch)) {
+          setSignedInTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+        }
+        return true;
+      } catch {
+        setActionError("Couldn't update activity — try again.");
+        if (isCurrentEpoch(task.id, epoch)) await refetchTasks();
+        return false;
+      } finally {
+        clearPending(task.id);
+      }
+    })();
+    actionChains.current.set(task.id, request);
+    void request.finally(() => {
+      if (actionChains.current.get(task.id) === request) actionChains.current.delete(task.id);
+    });
+    await request;
   };
 
   const setMode = async (nextMultitask: boolean) => {
@@ -339,27 +387,38 @@ export function TaskBoard({ initialTasks, userEmail, isSignedIn, initialMultitas
       return;
     }
 
-    const snapshot = signedInTasks;
     setSignedInTasks((prev) => prev.filter((t) => t.id !== task.id));
     setPending(task.id, "delete");
-    try {
-      // See toggleTask: wait for this task's create request to land first
-      // if it's still in flight, so a delete can't reach the server before
-      // the row it's deleting exists.
-      const stillCreating = creationRequests.current.get(task.id);
-      if (stillCreating && !(await stillCreating)) return;
+    const epoch = bumpEpoch(task.id);
 
-      const res = await fetch(`/api/tasks/${task.id}`, { method: "DELETE" });
-      if (!res.ok) {
-        setSignedInTasks(snapshot);
+    // See toggleTask: chain behind the previous in-flight request for this task.
+    const predecessor = actionChains.current.get(task.id);
+    const request = (async () => {
+      try {
+        // Delete doesn't care whether the predecessor succeeded — DELETE no-ops either way.
+        if (predecessor) await predecessor;
+
+        const res = await fetch(`/api/tasks/${task.id}`, { method: "DELETE" });
+        if (!res.ok) {
+          setActionError("Couldn't delete activity — try again.");
+          if (isCurrentEpoch(task.id, epoch)) await refetchTasks();
+          return false;
+        }
+        actionEpochs.current.delete(task.id);
+        return true;
+      } catch {
         setActionError("Couldn't delete activity — try again.");
+        if (isCurrentEpoch(task.id, epoch)) await refetchTasks();
+        return false;
+      } finally {
+        clearPending(task.id);
       }
-    } catch {
-      setSignedInTasks(snapshot);
-      setActionError("Couldn't delete activity — try again.");
-    } finally {
-      clearPending(task.id);
-    }
+    })();
+    actionChains.current.set(task.id, request);
+    void request.finally(() => {
+      if (actionChains.current.get(task.id) === request) actionChains.current.delete(task.id);
+    });
+    await request;
   };
 
   const clearAll = async () => {
@@ -375,7 +434,10 @@ export function TaskBoard({ initialTasks, userEmail, isSignedIn, initialMultitas
     }
 
     const res = await fetch("/api/tasks", { method: "DELETE" });
-    if (res.ok) setSignedInTasks([]);
+    if (res.ok) {
+      setSignedInTasks([]);
+      actionEpochs.current.clear();
+    }
   };
 
   const signOut = async () => {
@@ -385,7 +447,7 @@ export function TaskBoard({ initialTasks, userEmail, isSignedIn, initialMultitas
     router.refresh();
   };
 
-  const submitFeedback = async (e: React.FormEvent) => {
+  const submitFeedback = async (e: React.SubmitEvent) => {
     e.preventDefault();
     if (!feedbackMessage.trim() || feedbackStatus === "sending") return;
 
