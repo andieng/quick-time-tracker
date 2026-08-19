@@ -9,7 +9,7 @@ type FeedbackModalProps = {
   status: "idle" | "sending" | "sent" | "error";
   onTypeChange: (type: "bug" | "feature") => void;
   onMessageChange: (message: string) => void;
-  onSubmit: (e: React.FormEvent) => void;
+  onSubmit: (e: React.SubmitEvent) => void;
   onClose: () => void;
 };
 
