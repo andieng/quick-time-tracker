@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Analytics } from "@vercel/analytics/next";
 import { IBM_Plex_Sans, IBM_Plex_Sans_Condensed, IBM_Plex_Mono } from "next/font/google";
 import { SITE_URL } from "@/lib/site";
@@ -40,9 +40,6 @@ export const metadata: Metadata = {
   alternates: {
     canonical: "/",
   },
-  icons: {
-    icon: "/logo.svg",
-  },
   openGraph: {
     type: "website",
     url: SITE_URL,
@@ -57,6 +54,10 @@ export const metadata: Metadata = {
     description,
     images: ["/opengraph-image"],
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0B0C0F",
 };
 
 const structuredData = {
