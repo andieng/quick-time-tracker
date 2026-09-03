@@ -29,12 +29,14 @@ jobs:
         env:
           # Both are stored as secrets on the Production and Development
           # environments, so `environment:` above selects the right project.
+          # The secret key bypasses RLS and role grants (anon has no SELECT on
+          # public.tasks), so the keep-alive query gets a clean 200. This runs
+          # only in CI, never in the browser.
           SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
         run: |
           code=$(curl -sS -m 30 -o /dev/null -w '%{http_code}' \
             "${SUPABASE_URL}/rest/v1/tasks?select=id&limit=1" \
-            -H "apikey: ${SUPABASE_KEY}" \
-            -H "Authorization: Bearer ${SUPABASE_KEY}")
+            -H "apikey: ${SUPABASE_KEY}")
           echo "${{ matrix.environment }}: HTTP $code"
           test "$code" = "200"
