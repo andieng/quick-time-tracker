@@ -1,0 +1,40 @@
+name: Supabase Keep-Alive
+
+# Supabase free-tier projects pause after 7 consecutive days without database
+# activity. This workflow makes a real PostgREST query against each project
+# twice a week so neither the Production nor the Development project ever pauses.
+
+on:
+  schedule:
+    # 07:13 UTC every Monday and Thursday (max ~4-day gap). The odd minute/hour
+    # avoids the top-of-hour window where GitHub most heavily delays (or drops)
+    # scheduled runs; the 4-day gap leaves comfortable slack inside the 7-day
+    # pause window even if one run is skipped.
+    - cron: "13 7 * * 1,4"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping:
+    name: Ping Supabase (${{ matrix.environment }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [Production, Development]
+    environment: ${{ matrix.environment }}
+    steps:
+      - name: Ping Supabase REST API
+        env:
+          # Resolves to the environment-scoped value when set, otherwise the
+          # repo-level value. Same names used by the Quality Gate workflow.
+          SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          code=$(curl -sS -m 30 -o /dev/null -w '%{http_code}' \
+            "${SUPABASE_URL}/rest/v1/tasks?select=id&limit=1" \
+            -H "apikey: ${SUPABASE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_KEY}")
+          echo "${{ matrix.environment }}: HTTP $code"
+          test "$code" = "200"
