@@ -1,8 +1,9 @@
 name: Supabase Keep-Alive
 
-# Supabase free-tier projects pause after 7 consecutive days without database
-# activity. This workflow makes a real PostgREST query against each project
-# twice a week so neither the Production nor the Development project ever pauses.
+# Supabase free-tier projects pause after 7 consecutive days without activity.
+# This workflow makes an authenticated request to each project's PostgREST
+# endpoint twice a week so neither the Production nor the Development project
+# ever pauses.
 
 on:
   schedule:
@@ -29,14 +30,14 @@ jobs:
         env:
           # Both are stored as secrets on the Production and Development
           # environments, so `environment:` above selects the right project.
-          # The secret key bypasses RLS and role grants (anon has no SELECT on
-          # public.tasks), so the keep-alive query gets a clean 200. This runs
-          # only in CI, never in the browser.
+          # Hitting the PostgREST root (not a table) avoids needing any table
+          # grant; it just needs the secret key. This runs only in CI, never
+          # in the browser.
           SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
         run: |
           code=$(curl -sS -m 30 -o /dev/null -w '%{http_code}' \
-            "${SUPABASE_URL}/rest/v1/tasks?select=id&limit=1" \
+            "${SUPABASE_URL}/rest/v1/" \
             -H "apikey: ${SUPABASE_KEY}")
           echo "${{ matrix.environment }}: HTTP $code"
           test "$code" = "200"
