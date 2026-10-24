@@ -30,14 +30,17 @@ jobs:
         env:
           # Both are stored as secrets on the Production and Development
           # environments, so `environment:` above selects the right project.
-          # Hitting the PostgREST root (not a table) avoids needing any table
-          # grant; it just needs the secret key. This runs only in CI, never
-          # in the browser.
+          # The request must reach Postgres: Supabase only counts database
+          # activity, and the PostgREST root (`/rest/v1/`) is served from the
+          # schema cache, so pinging it still let both projects pause.
+          # service_role already has SELECT on feedback_rate_limit, so the
+          # secret key can read it with no extra grant. This runs only in CI,
+          # never in the browser.
           SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
         run: |
           code=$(curl -sS -m 30 -o /dev/null -w '%{http_code}' \
-            "${SUPABASE_URL}/rest/v1/" \
+            "${SUPABASE_URL}/rest/v1/feedback_rate_limit?select=id&limit=1" \
             -H "apikey: ${SUPABASE_KEY}")
           echo "${{ matrix.environment }}: HTTP $code"
           test "$code" = "200"
