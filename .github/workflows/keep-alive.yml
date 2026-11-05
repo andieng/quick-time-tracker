@@ -1,17 +1,16 @@
 name: Supabase Keep-Alive
 
-# Supabase free-tier projects pause after 7 consecutive days without activity.
-# This workflow makes an authenticated request to each project's PostgREST
-# endpoint twice a week so neither the Production nor the Development project
-# ever pauses.
+# Supabase free-tier projects pause after 7 days of low database activity.
+# Supabase says "a few requests a day" is typically enough, so this workflow
+# runs every 6 hours and sends 3 real database queries to each project
+# (Production and Development). Twice a week was not enough: both projects
+# paused four days after a successful ping.
 
 on:
   schedule:
-    # 07:13 UTC every Monday and Thursday (max ~4-day gap). The odd minute/hour
-    # avoids the top-of-hour window where GitHub most heavily delays (or drops)
-    # scheduled runs; the 4-day gap leaves comfortable slack inside the 7-day
-    # pause window even if one run is skipped.
-    - cron: "13 7 * * 1,4"
+    # Every 6 hours, at minute 13. The odd minute avoids the top-of-hour
+    # window where GitHub most heavily delays (or drops) scheduled runs.
+    - cron: "13 */6 * * *"
   workflow_dispatch:
 
 permissions: {}
@@ -39,8 +38,13 @@ jobs:
           SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
         run: |
-          code=$(curl -sS -m 30 -o /dev/null -w '%{http_code}' \
-            "${SUPABASE_URL}/rest/v1/feedback_rate_limit?select=id&limit=1" \
-            -H "apikey: ${SUPABASE_KEY}")
-          echo "${{ matrix.environment }}: HTTP $code"
-          test "$code" = "200"
+          failed=0
+          for i in 1 2 3; do
+            code=$(curl -sS -m 30 -o /dev/null -w '%{http_code}' \
+              "${SUPABASE_URL}/rest/v1/feedback_rate_limit?select=id&limit=1" \
+              -H "apikey: ${SUPABASE_KEY}") || code="curl-error"
+            echo "${{ matrix.environment }} query $i: HTTP $code"
+            if [ "$code" != "200" ]; then failed=1; fi
+            sleep 2
+          done
+          exit "$failed"
